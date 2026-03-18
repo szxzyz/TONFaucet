@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import Layout from "@/components/Layout";
@@ -9,9 +8,11 @@ import { useAdmin } from "@/hooks/useAdmin";
 import { useAdFlow } from "@/hooks/useAdFlow";
 import { useLocation } from "wouter";
 import { SettingsPopup } from "@/components/SettingsPopup";
-import { Award, Wallet, RefreshCw, Flame, Ticket, Info, User as UserIcon, Clock, Loader2, Gift, Rocket, X, Bug, DollarSign, Coins, Send, Users, Check, ExternalLink, Plus, CalendarCheck, Bell, Star, Play, Sparkles, Zap, Settings, Film, Tv, Target, LayoutDashboard, ClipboardList, UserPlus, Share2, Copy, HeartHandshake, ChevronRight } from "lucide-react";
+import InvitePopup from "@/components/InvitePopup";
+import { useLanguage } from "@/hooks/useLanguage";
+import { MatrixMiningCounter } from "@/components/MatrixMiningCounter";
+import { Award, Wallet, RefreshCw, Flame, Ticket, Info, User as UserIcon, Clock, Loader2, Gift, Rocket, X, Bug, DollarSign, Coins, Send, Users, Check, ExternalLink, Plus, CalendarCheck, Bell, Star, Play, Zap, Settings, Film, Tv, ClipboardList, UserPlus, Share2, Copy, HandCoins, LogOut, Download, ShieldCheck, Menu } from "lucide-react";
 import { DiamondIcon } from "@/components/DiamondIcon";
-import { TonCoinIcon } from "@/components/TonCoinIcon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { showNotification } from "@/components/AppNotification";
@@ -19,7 +20,10 @@ import { apiRequest } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AnimatePresence, motion } from "framer-motion";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import WithdrawalPopup from "@/components/WithdrawalPopup";
+import MenuPopup from "@/components/MenuPopup";
+import { SatPriceChart } from "@/components/SatPriceChart";
+
 
 // Unified Task Interface
 interface UnifiedTask {
@@ -28,7 +32,7 @@ interface UnifiedTask {
   taskType: string;
   title: string;
   link: string | null;
-  rewardHrum: number;
+  rewardAXN: number;
   rewardBUG?: number;
   rewardType: string;
   isAdminTask: boolean;
@@ -38,12 +42,14 @@ interface UnifiedTask {
 
 declare global {
   interface Window {
+    show_9368336: (type?: string | { type: string; inAppSettings: any }) => Promise<void>;
     show_10401872: (type?: string | { type: string; inAppSettings: any }) => Promise<void>;
     Adsgram: {
       init: (config: { blockId: string }) => {
         show: () => Promise<void>;
       };
     };
+    showGiga: (placement: string) => Promise<void>;
   }
 }
 
@@ -61,26 +67,20 @@ interface User {
   [key: string]: any;
 }
 
-import { useLanguage } from "@/hooks/useLanguage";
-
 export default function Home() {
   const { user, isLoading } = useAuth();
   const { isAdmin } = useAdmin();
+  const { t } = useLanguage();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const { t } = useLanguage();
 
-  const [isConverting, setIsConverting] = useState(false);
-  const [isClaimingStreak, setIsClaimingStreak] = useState(false);
-  const [promoCode, setPromoCode] = useState("");
-  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
-  const [hasClaimed, setHasClaimed] = useState(false);
-  const [timeUntilNextClaim, setTimeUntilNextClaim] = useState<string>("");
-  
   const [promoPopupOpen, setPromoPopupOpen] = useState(false);
+  const [withdrawPopupOpen, setWithdrawPopupOpen] = useState(false);
   const [convertPopupOpen, setConvertPopupOpen] = useState(false);
   const [boosterPopupOpen, setBoosterPopupOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [selectedConvertType, setSelectedConvertType] = useState<'' | 'BUG'>('');
   const [convertAmount, setConvertAmount] = useState<string>("");
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
@@ -89,6 +89,11 @@ export default function Home() {
   const [dailyCheckinStep, setDailyCheckinStep] = useState<'idle' | 'ads' | 'countdown' | 'ready' | 'claiming'>('idle');
   const [checkForUpdatesStep, setCheckForUpdatesStep] = useState<'idle' | 'opened' | 'countdown' | 'ready' | 'claiming'>('idle');
   const [checkForUpdatesCountdown, setCheckForUpdatesCountdown] = useState(3);
+  const [hasClaimed, setHasClaimed] = useState(false);
+  const [timeUntilNextClaim, setTimeUntilNextClaim] = useState<string>("");
+  const [isConverting, setIsConverting] = useState(false);
+  
+  const padBalance = parseFloat((user as User)?.balance || "0");
 
   const { runAdFlow } = useAdFlow();
 
@@ -123,6 +128,83 @@ export default function Home() {
     queryKey: ['/api/missions/status'],
     retry: false,
   });
+
+  const { data: miningState, isLoading: isLoadingMining } = useQuery<any>({
+    queryKey: ['/api/mining/state'],
+    retry: false,
+    staleTime: 10000,
+  });
+
+  const miningStateData = miningState || {};
+  const [miningAmount, setMiningAmount] = useState(0);
+  const activeBoosts = miningStateData.boosts || [];
+  
+  const miningRate = parseFloat(miningStateData.rawMiningRate || "0.00001");
+  const miningRatePerHour = miningRate * 3600;
+
+  useEffect(() => {
+    if (miningStateData.currentMining) {
+      setMiningAmount(parseFloat(miningStateData.currentMining));
+    }
+  }, [miningStateData.currentMining]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMiningAmount(prev => prev + miningRate);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [miningRate]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      queryClient.setQueryData(['/api/mining/state'], (old: any) => {
+        if (!old || !old.boosts) return old;
+        return {
+          ...old,
+          boosts: old.boosts.map((b: any) => ({
+            ...b,
+            remainingTime: Math.max(0, b.remainingTime - 1)
+          }))
+        };
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [queryClient]);
+
+  const formatRemainingTime = (seconds: number) => {
+    if (seconds <= 0) return "Expired";
+    const days = Math.floor(seconds / (24 * 3600));
+    const hours = Math.floor((seconds % (24 * 3600)) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (days > 0) return `${days}d ${hours}h`;
+    return `${hours}h ${minutes}m ${secs}s`;
+  };
+
+  const claimMiningMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/mining/claim");
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to claim mining');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/mining/state"] });
+      showNotification(`+${Math.floor(parseFloat(data.amount)).toLocaleString()} SAT claimed from mining!`, "success");
+    },
+    onError: (error: any) => {
+      showNotification(error.message, "error");
+    },
+  });
+
+  const minMiningClaim = 1;
+  const canClaimMining = miningState && parseFloat(miningState.currentMining || "0") >= minMiningClaim;
+
+  // Render mining section (need to find where it is in the file)
 
   const { data: userData } = useQuery<{ referralCode?: string }>({
     queryKey: ['/api/auth/user'],
@@ -195,7 +277,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ hrumAmount: amount, convertTo }),
+        body: JSON.stringify({ axnAmount: amount, convertTo }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -213,6 +295,10 @@ export default function Home() {
       showNotification(error.message, "error");
     },
   });
+
+  const [promoCode, setPromoCode] = useState("");
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+  const [isClaimingStreak, setIsClaimingStreak] = useState(false);
 
   const claimStreakMutation = useMutation({
     mutationFn: async () => {
@@ -235,8 +321,8 @@ export default function Home() {
       queryClient.invalidateQueries({ queryKey: ["/api/user/stats"] });
       const rewardAmount = parseFloat(data.rewardEarned || '0');
       if (rewardAmount > 0) {
-        const earnedHrum = Math.round(rewardAmount);
-        showNotification(`You've claimed +${earnedHrum} Hrum!`, "success");
+        const earnedSAT = Math.round(rewardAmount);
+        showNotification(`You've claimed +${earnedSAT.toLocaleString()} SAT!`, "success");
       } else {
         showNotification("You've claimed your streak bonus!", "success");
       }
@@ -336,13 +422,22 @@ export default function Home() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Failed to claim reward');
+
+      // Update local state to instantly hide the popup
+      setCompletedTasks(prev => {
+        const next = new Set(prev);
+        next.add(taskId);
+        return next;
+      });
+
       return data;
     },
     onSuccess: async (data) => {
+      // Background refetch to keep data in sync
       queryClient.invalidateQueries({ queryKey: ['/api/auth/user'] });
-      await queryClient.refetchQueries({ queryKey: ['/api/tasks/home/unified'] });
-      const hrumReward = Number(data.reward ?? 0);
-      showNotification(`+${hrumReward.toLocaleString()} Hrum earned!`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['/api/tasks/home/unified'] });
+      const satReward = Number(data.reward ?? 0);
+      showNotification(`+${satReward.toLocaleString()} SAT earned!`, 'success');
     },
     onError: (error: any) => {
       showNotification(error.message || 'Failed to claim reward', 'error');
@@ -429,13 +524,7 @@ export default function Home() {
 
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
   const [adStartTime, setAdStartTime] = useState<number>(0);
-  const { data: stats } = useQuery<any>({
-    queryKey: ['/api/referrals/stats'],
-    retry: false,
-    staleTime: 60000,
-  });
-
-  const botUsername = import.meta.env.VITE_BOT_USERNAME || 'MoneyAdzbot';
+  const botUsername = import.meta.env.VITE_BOT_USERNAME || 'MoneyAXNbot';
   const referralLink = user?.referralCode 
     ? `https://t.me/${botUsername}?start=${user.referralCode}`
     : '';
@@ -522,7 +611,7 @@ export default function Home() {
       queryClient.invalidateQueries({ queryKey: ["/api/user/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/earnings"] });
       
-      showNotification(`You received ${data.rewardHrum || 1000} Hrum on your balance`, "success");
+      showNotification(`You received ${Math.round(data.rewardAXN || 1000).toLocaleString()} SAT on your balance`, "success");
       setLoadingProvider(null);
     },
     onError: (error: any) => {
@@ -539,6 +628,7 @@ export default function Home() {
       setLoadingProvider(null);
     },
   });
+
 
   const handleWatchAd = async (providerId: string) => {
     if (loadingProvider) return;
@@ -717,10 +807,8 @@ export default function Home() {
     setConvertPopupOpen(true);
   };
 
-  const rawBalance = parseFloat((user as User)?.balance || "0");
-  const padBalance = rawBalance < 1 ? Math.round(rawBalance * 10000000) : Math.round(rawBalance);
-  const balance = parseFloat((user as User)?.tonBalance || "0");
-  const balanceBUG = parseFloat((user as User)?.bugBalance || "0");
+  const satBalance = Math.floor(parseFloat((user as User)?.balance || "0"));
+  const withdrawBalance = satBalance;
   
   const displayName = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.first_name || (user as User)?.firstName || (user as User)?.username || "User";
   const photoUrl = typeof window !== 'undefined' && (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.photo_url;
@@ -732,19 +820,17 @@ export default function Home() {
       return;
     }
 
-    const minimumConvertHrum = selectedConvertType === '' 
-      ? (appSettings?.minimumConvertHrum || 10000)
-      : selectedConvertType === ''
-        ? (appSettings?.minimumConvertPadToTon || 10000)
-        : (appSettings?.minimumConvertPadToBug || 1000);
+    const minimumConvertAXN = selectedConvertType === '' 
+      ? (appSettings?.minimumConvertAXN || 10000)
+      : (selectedConvertType === 'BUG' ? (appSettings?.minimumConvertPadToBug || 1000) : (appSettings?.minimumConvertPadToTon || 10000));
     
-    if (amount < minimumConvertHrum) {
-      showNotification(`Minimum ${minimumConvertHrum.toLocaleString()} Hrum required.`, "error");
+    if (amount < minimumConvertAXN) {
+      showNotification(`Minimum ${minimumConvertAXN.toLocaleString()} AXN required.`, "error");
       return;
     }
 
     if (padBalance < amount) {
-      showNotification("Insufficient Hrum balance", "error");
+      showNotification("Insufficient AXN balance", "error");
       return;
     }
 
@@ -754,14 +840,11 @@ export default function Home() {
     console.log('💱 Convert started, showing AdsGram ad first...');
     
     try {
-      // Then show Monetag rewarded ad
-      console.log('🎬 Proceeding with Monetag rewarded...');
       const monetagResult = await showMonetagRewardedAd();
       
       if (monetagResult.unavailable) {
-        // If Monetag unavailable, proceed
         console.log('⚠️ Monetag unavailable, proceeding with convert');
-        convertMutation.mutate({ amount, convertTo: selectedConvertType });
+        convertMutation.mutate({ amount, convertTo: selectedConvertType || 'TON' });
         return;
       }
       
@@ -772,7 +855,7 @@ export default function Home() {
       }
       
       console.log('✅ Ad watched, converting');
-      convertMutation.mutate({ amount, convertTo: selectedConvertType });
+      convertMutation.mutate({ amount, convertTo: selectedConvertType || 'TON' });
       
     } catch (error) {
       console.error('Convert error:', error);
@@ -905,7 +988,7 @@ export default function Home() {
         extraAdsWatchedToday: data.extraAdsWatchedToday
       }));
       
-      showNotification(`You received ${data.rewardHrum} Hrum for Extra Earn!`, "success");
+      showNotification(`You received ${data.rewardAXN} SAT for Extra Earn!`, "success");
     } catch (error: any) {
       console.error('Extra earn error:', error);
       showNotification(error.message || "Extra Earn ad failed", "error");
@@ -915,7 +998,7 @@ export default function Home() {
   const handleShareWithFriends = useCallback(() => {
     if (!referralLink) return;
     const tgWebApp = (window as any).Telegram?.WebApp;
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("Join me on CashWatch and earn rewards together!")}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent("Join me on this Mine-to-Earn app and start stacking SAT together!")}`;
     if (tgWebApp?.openTelegramLink) {
       tgWebApp.openTelegramLink(shareUrl);
     } else {
@@ -988,7 +1071,7 @@ export default function Home() {
   const handleCheckForUpdates = useCallback(() => {
     if (missionStatus?.checkForUpdates?.claimed || checkForUpdatesStep !== 'idle') return;
     const tgWebApp = (window as any).Telegram?.WebApp;
-    const channelUrl = 'https://t.me/MoneyAdz';
+    const channelUrl = 'https://t.me/LightningSatoshi';
     if (tgWebApp?.openTelegramLink) {
       tgWebApp.openTelegramLink(channelUrl);
     } else if (tgWebApp?.openLink) {
@@ -1016,57 +1099,6 @@ export default function Home() {
     checkForUpdatesMutation.mutate();
   }, [checkForUpdatesMutation]);
 
-  const [miningBalance, setMiningBalance] = useState<number>(0);
-
-  useEffect(() => {
-    const updateMining = () => {
-      if (user?.lastMiningClaim) {
-        const lastClaim = new Date(user.lastMiningClaim).getTime();
-        const rate = parseFloat(user.miningRate || "0.00001");
-        const now = Date.now();
-        const secondsPassed = (now - lastClaim) / 1000;
-        const earned = Math.max(0, secondsPassed * rate);
-        setMiningBalance(earned);
-      }
-    };
-
-    updateMining();
-    const interval = setInterval(updateMining, 100);
-    return () => clearInterval(interval);
-  }, [user?.lastMiningClaim, user?.miningRate]);
-
-  const formatMiningBalance = (balance: number) => {
-    const parts = balance.toFixed(6).split('.');
-    return (
-      <span className="text-white font-bold tracking-tighter tabular-nums flex items-baseline">
-        <span className="text-3xl">{parts[0]}</span>
-        <span className="text-xl">.{parts[1]}</span>
-      </span>
-    );
-  };
-
-  const claimMiningMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/mining/claim", {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Failed to claim mining");
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      showNotification(`Claimed ${parseFloat(data.amount).toFixed(5)} Hrum!`, "success");
-      setMiningBalance(0);
-    },
-    onError: (error: any) => {
-      showNotification(error.message, "error");
-    }
-  });
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1084,206 +1116,182 @@ export default function Home() {
 
   const userRank = leaderboardData?.userEarnerRank?.rank;
 
+  // Values are now derived from miningState above
+
+  const handleClaimClick = () => {
+    if (miningAmount < 1) {
+      showNotification("Minimum claim is 1 SAT", "error");
+      return;
+    }
+    claimMiningMutation.mutate();
+  };
+
   return (
     <Layout>
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex-none px-4 pt-4">
-          {/* Unified Balance Section */}
-            <div className="bg-[#261400] rounded-[20px] p-4 border border-[#B34700]/30 mb-1 relative shadow-xl">
-              <div className="flex items-center justify-center gap-3 mb-3 px-1">
-                <div className="w-1.5 h-6 bg-[#E88A1A] rounded-full"></div>
-                <h2 className="text-lg font-bold text-white uppercase tracking-tight text-center">{t('mining')}</h2>
-                <div className="w-1.5 h-6 bg-[#E88A1A] rounded-full"></div>
-              </div>
-              <div className="bg-[#3D1F00] rounded-[16px] p-4 border border-[#B34700]/30 shadow-lg mb-2 relative overflow-hidden">
-                <div className="flex flex-col items-center gap-4">
-                  {formatMiningBalance(miningBalance)}
-                  
-                  <div className="flex items-center justify-center gap-2 w-full">
-                    <Button 
-                      variant="outline"
-                      className="flex-1 h-9 px-4 text-xs font-bold rounded-[12px] border-[#B34700]/30 text-white bg-[#261400] hover:bg-[#3D1F00]"
-                      onClick={() => setBoosterPopupOpen(true)}
-                    >
-                      {t('speed_boost')}
-                    </Button>
-                    <Button 
-                      className="flex-1 h-9 px-6 text-xs font-bold rounded-[12px] bg-[#E88A1A] hover:bg-[#B34700] text-white shadow-lg shadow-[#E88A1A]/20"
-                      onClick={() => claimMiningMutation.mutate()}
-                      disabled={claimMiningMutation.isPending || miningBalance < 0.001}
-                    >
-                      {t('collect_money')}
-                    </Button>
+      <main className="max-w-md mx-auto px-4 pt-4 pb-0">
+        {/* Unified Profile & Balance Section */}
+        <div className="mb-4 relative">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-3">
+              <div 
+                className={`w-11 h-11 rounded-full overflow-hidden flex items-center justify-center border border-white/5 bg-[#1a1a1a] cursor-pointer hover:opacity-80 transition-opacity`}
+                onClick={() => setLocation("/admin")}
+              >
+                {photoUrl ? (
+                  <img 
+                    src={photoUrl} 
+                    alt="Profile" 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <UserIcon className="w-6 h-6 text-gray-400" />
                   </div>
+                )}
+              </div>
+              <div className="flex flex-col">
+                <span 
+                  className={`text-white font-black text-base leading-none tracking-tight cursor-pointer hover:opacity-80`}
+                  onClick={() => setLocation("/admin")}
+                >
+                  {(user as User)?.firstName || (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.first_name || "User"}
+                </span>
+                <span className="text-[#B9FF66] text-[10px] font-black uppercase tracking-widest mt-1 opacity-90">
+                  ID: {(user as User)?.id?.substring(0, 8) || "N/A"}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setMenuOpen(true)}
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#1a1a1a] border border-white/10 hover:bg-white/10 transition-all active:scale-95"
+            >
+              <Menu className="w-4 h-4 text-white" />
+            </button>
+          </div>
+
+          <div className="bg-[#141414] rounded-2xl px-4 py-2 flex justify-between items-center mb-4 border border-white/5 h-12">
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[#8E8E93] text-[9px] font-semibold uppercase tracking-wider mb-0.5">Total SAT Mined</span>
+              <div className="flex items-center gap-1.5 leading-none">
+                <img src="/sat-icon.png" alt="SAT" className="w-4 h-4 rounded-full object-cover" />
+                <span className="text-white text-base font-black tabular-nums">
+                  {Math.floor(parseFloat(user?.balance || "0")).toLocaleString()}
+                </span>
+                <span className="text-[#F5C542] text-[10px] font-bold">SAT</span>
+              </div>
+            </div>
+            <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[#8E8E93] text-[9px] font-semibold uppercase tracking-wider mb-0.5">Mining Rate</span>
+              <div className="flex items-center gap-1.5 leading-none">
+                <img src="/sat-icon.png" alt="SAT" className="w-4 h-4 rounded-full object-cover" />
+                <span className="text-white text-base font-black tabular-nums">
+                  {miningRatePerHour.toFixed(4)}
+                </span>
+                <span className="text-[#8E8E93] text-[10px] font-bold">SAT/h</span>
+              </div>
+            </div>
+          </div>
+
+          <SatPriceChart />
+
+          <div className="w-full">
+              <div className="bg-[#141414] rounded-2xl p-4 border border-white/5 mb-4">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-[#8E8E93] text-[10px] font-black uppercase tracking-widest">{t('mining_status')}</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
+                    <span className="text-blue-500 text-[10px] font-black uppercase tracking-widest">{t('active')}</span>
+                  </div>
+                </div>
+                
+                <div className="mb-4">
+                  <MatrixMiningCounter miningAmount={miningAmount} miningRate={miningRate} />
+                </div>
+
+                {activeBoosts.length > 0 && (
+                  <div className="mb-4 space-y-2 max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Clock className="w-3 h-3 text-[#8E8E93]" />
+                      <span className="text-[#8E8E93] text-[9px] font-black uppercase tracking-widest">Active Boosters</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      {activeBoosts.map((boost: any) => (
+                        <div key={boost.id} className="bg-white/5 rounded-xl p-3 border border-white/5 flex justify-between items-center">
+                          <div className="space-y-0.5 text-left">
+                            <div className="text-white text-[10px] font-black uppercase tracking-tight">Mining Boost</div>
+                            <div className="text-white text-[9px] font-bold">+{boost.miningRate} SAT/h</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[#8E8E93] text-[8px] font-black uppercase tracking-widest">Expires In</div>
+                            <div className="text-white text-[10px] font-bold tabular-nums">
+                              {formatRemainingTime(boost.remainingTime)}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/5">
+                  <Button
+                    onClick={() => setWithdrawPopupOpen(true)}
+                    className="w-full h-11 bg-[#F5C542] hover:bg-yellow-400 text-black rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-yellow-500/20"
+                  >
+                    <Download className="w-4 h-4" />
+                    Withdraw
+                  </Button>
+                  <Button
+                    onClick={handleClaimClick}
+                    disabled={claimMiningMutation.isPending || !canClaimMining}
+                    className="w-full h-11 bg-[#F5C542] hover:bg-yellow-400 text-black rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                  >
+                    {claimMiningMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <HandCoins className="w-4 h-4" />
+                        Claim
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
 
-              <div className="mt-2 mb-2">
-                <div className="text-white text-xs font-bold text-center">{t('daily_income')}</div>
-              </div>
-
-              {/* Action Buttons */}
               <div className="grid grid-cols-2 gap-3">
-                <Button
-                  onClick={handleConvertClick}
-                  variant="outline"
-                  className="bg-[#3D1F00] border-[#B34700]/30 hover:bg-[#261400] text-[#FFFFFF] rounded-[16px] py-3 text-sm font-bold flex items-center justify-center gap-2 h-auto"
-                >
-                  <RefreshCw className="w-4 h-4 text-[#F2B824]" />
-                  {t('convert')}
-                </Button>
-                <Button
-                  onClick={() => setPromoPopupOpen(true)}
-                  variant="outline"
-                  className="bg-[#3D1F00] border-[#B34700]/30 hover:bg-[#261400] text-[#FFFFFF] rounded-[16px] py-3 text-sm font-bold flex items-center justify-center gap-2 h-auto"
-                >
-                  <Ticket className="w-4 h-4 text-[#F2B824]" />
-                  {t('promo')}
-                </Button>
+                <AdWatchingSection user={user as User} section="section1" />
+                <AdWatchingSection user={user as User} section="section2" />
               </div>
-            </div>
-        </div>
 
-        <div className="flex-1 min-h-0 flex flex-col">
-          <Tabs defaultValue="tasks" className="flex-1 flex flex-col min-h-0">
-            <div className="px-4 flex-none">
-              <TabsList className="grid w-full grid-cols-2 bg-[#261400] border border-[#B34700]/30 h-12 p-1 rounded-[16px] mb-2 shadow-inner">
-                <TabsTrigger 
-                  value="tasks" 
-                  className="flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider rounded-[12px] data-[state=active]:bg-[#3D1F00] data-[state=active]:text-[#F2B824] data-[state=active]:shadow-lg transition-all h-full"
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  {t('tasks')}
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="referrals" 
-                  className="flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider rounded-[12px] data-[state=active]:bg-[#3D1F00] data-[state=active]:text-[#F2B824] data-[state=active]:shadow-lg transition-all h-full"
-                >
-                  <HeartHandshake className="w-4 h-4" />
-                  {t('referrals')}
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <div className="flex-1 overflow-y-auto min-h-0 px-4 scrollbar-hide pb-0">
-              <TabsContent value="tasks" className="mt-0 outline-none pb-0">
-                <div className="space-y-2 pt-0">
-                  <div className="flex items-center justify-between px-1 mb-0">
-                    <div className="flex items-center gap-3">
-                      <div className="w-1.5 h-6 bg-[#E88A1A] rounded-full"></div>
-                      <h2 className="text-lg font-bold text-white uppercase tracking-tight">{t('active_tasks')}</h2>
-                    </div>
-                    <div className="text-[11px] font-bold text-[#D1D5DB] uppercase tracking-wider tabular-nums">
-                      {(unifiedTasksData?.tasks?.length || 0) + (adsWatchedToday < dailyLimit ? 1 : 0)} {t('available')}
+              {/* Invite Friends Section */}
+              <div
+                className="mt-3 bg-[#141414] rounded-2xl p-4 border border-white/5 cursor-pointer hover:bg-[#1a1a1a] transition-all active:scale-[0.99]"
+                onClick={() => setInviteOpen(true)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl flex-shrink-0 leading-none">🤝</span>
+                    <div>
+                      <p className="text-white font-black text-sm leading-tight">
+                        Invite Friends and Earn
+                      </p>
+                      <p className="text-[#F5C542] font-bold text-xs mt-0.5">
+                        +0.02 SAT/h per friend
+                      </p>
                     </div>
                   </div>
-                  
-                            <div className="flex flex-col gap-3">
-                              <AdWatchingSection user={user as User} />
-                              <AnimatePresence mode="popLayout">
-                                {isLoadingTasks ? (
-                                  <div className="py-12 flex justify-center">
-                                    <Loader2 className="w-8 h-8 text-[#E88A1A] animate-spin" />
-                                  </div>
-                                ) : (unifiedTasksData?.tasks && unifiedTasksData.tasks.length > 0) ? (
-                                  unifiedTasksData.tasks.map((task) => (
-                                    <motion.div
-                                      key={task.id}
-                                      initial={{ opacity: 0, y: 10 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      className="bg-[#261400] border border-[#B34700]/30 rounded-[16px] p-4 shadow-lg"
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4 flex-1 min-w-0">
-                                          <div className="w-12 h-12 rounded-[12px] flex items-center justify-center flex-shrink-0 bg-[#3D1F00] border border-[#B34700]/30">
-                                            <span className="text-[#F2B824]">
-                                              {getTaskIcon(task)}
-                                            </span>
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <h3 className="text-white font-bold text-sm tracking-tight truncate">{task.title}</h3>
-                                            <div className="flex items-center gap-3 mt-1">
-                                              <div className="flex items-center gap-1.5">
-                                                <DiamondIcon size={14} className="text-[#F2B824]" />
-                                                <span className="text-[13px] font-bold text-white">+{task.rewardHrum.toLocaleString()}</span>
-                                              </div>
-                                              {task.rewardBUG && task.rewardBUG > 0 && (
-                                                <div className="flex items-center gap-1.5">
-                                                  <Bug className="w-3.5 h-3.5 text-[#E88A1A]" />
-                                                  <span className="text-[13px] font-bold text-[#E88A1A]">+{task.rewardBUG}</span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <Button
-                                          onClick={() => handleUnifiedTask(task)}
-                                          disabled={isTaskPending || claimAdvertiserTaskMutation.isPending || completedTasks.has(task.id)}
-                                          variant={completedTasks.has(task.id) ? "secondary" : clickedTasks.has(task.id) ? "default" : "outline"}
-                                          size="sm"
-                                          className={`rounded-[12px] px-5 font-semibold transition-all ${
-                                            completedTasks.has(task.id)
-                                              ? "opacity-50 bg-[#3D1F00] text-[#D1D5DB]"
-                                              : clickedTasks.has(task.id)
-                                              ? "bg-[#E88A1A] text-white"
-                                              : "border-[#B34700]/30 text-white bg-[#261400]"
-                                          }`}
-                                        >
-                                          {completedTasks.has(task.id) ? "Done" : clickedTasks.has(task.id) ? t('claim') : t('open')}
-                                        </Button>
-                                      </div>
-                                    </motion.div>
-                                  ))
-                                ) : (
-                                  null
-                                )}
-                              </AnimatePresence>
+                  <div className="flex items-center gap-1.5 bg-[#F5C542] rounded-xl px-3 py-2 flex-shrink-0">
+                    <Send className="w-3.5 h-3.5 text-black" />
+                    <span className="text-black text-xs font-black uppercase tracking-wider">Invite</span>
                   </div>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="referrals" className="mt-0 outline-none pb-0">
-                <div className="flex flex-col items-center text-center pt-1 pb-1">
-                  <h2 className="text-xl font-bold text-white mb-0.5">Invite friends and earn</h2>
-                  <p className="text-[13px] text-[#B0B3B8] mb-2 max-w-[280px] leading-snug">
-                    10% of their Hrum and When your friend buys a plan you get <span className="font-bold text-[#F5C542]">{appSettings?.referralRewardHrum || 50} Hrum</span> instantly
-                  </p>
-
-                  <div className="w-full grid grid-cols-2 gap-3 mb-4">
-                    <div className="bg-[#24262C] border border-[#2F3238]/50 rounded-[16px] p-3 shadow-inner text-center">
-                      <p className="text-[10px] text-[#7A7D85] mb-1 uppercase font-bold tracking-wider">User referred</p>
-                      <p className="text-lg font-bold text-white">{stats?.totalInvites || 0}</p>
-                    </div>
-                    <div className="bg-[#24262C] border border-[#2F3238]/50 rounded-[16px] p-3 shadow-inner text-center">
-                      <p className="text-[10px] text-[#7A7D85] mb-1 uppercase font-bold tracking-wider">Successful</p>
-                      <p className="text-lg font-bold text-white">{stats?.successfulInvites || 0}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex w-full gap-3">
-                    <Button
-                      onClick={copyReferralLink}
-                      disabled={!referralLink}
-                      variant="secondary"
-                      className="flex-1 h-12 rounded-[16px] font-bold text-sm gap-2"
-                    >
-                      <Copy className="w-4 h-4" />
-                      Copy Link
-                    </Button>
-                    <Button
-                      onClick={shareReferralLink}
-                      disabled={!referralLink || isSharing}
-                      className="flex-1 h-12 bg-[#2D6CDF] hover:bg-[#2458b8] text-white rounded-[16px] font-bold text-sm"
-                    >
-                      {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Invite Friends +"}
-                    </Button>
-                  </div>
-                </div>
-              </TabsContent>
-            </div>
-          </Tabs>
+              </div>
+          </div>
         </div>
-      </div>
+
+      </main>
 
       {boosterPopupOpen && (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 px-4">
@@ -1294,26 +1302,26 @@ export default function Home() {
             </div>
             
             <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
-              <div className="flex items-center justify-between bg-[#1F2229] rounded-lg p-3 hover:bg-[#24262C] transition border border-[#2F3238]/30">
+              <div className="flex items-center justify-between bg-[#1a1a1a] rounded-lg p-3 hover:bg-[#222] transition">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
-                    <Users className="w-4 h-4 text-[#0098EA]" />
+                    <Users className="w-4 h-4 text-[#4cd3ff]" />
                     <p className="text-white text-sm font-medium truncate">Share with Friends</p>
                   </div>
-                  <div className="text-xs text-[#B0B3B8] ml-6">
-                    <p>Reward: <span className="text-[#F5C542] font-medium">{appSettings?.referralRewardHrum || '5'} Hrum</span></p>
+                  <div className="text-xs text-gray-400 ml-6">
+                    <p>Reward: <span className="text-white font-medium">{appSettings?.referralRewardAXN || '5'} SAT</span></p>
                   </div>
                 </div>
                 <div className="ml-3 flex-shrink-0">
                   {missionStatus?.shareStory?.claimed ? (
-                    <div className="h-8 w-20 rounded-lg bg-[#26D07C]/10 flex items-center justify-center">
-                      <Check className="w-4 h-4 text-[#26D07C]" />
+                    <div className="h-8 w-20 rounded-lg bg-green-500/20 flex items-center justify-center">
+                      <Check className="w-4 h-4 text-green-400" />
                     </div>
                   ) : shareWithFriendsStep === 'ready' || shareWithFriendsStep === 'claiming' ? (
                     <Button
                       onClick={handleClaimShareWithFriends}
                       disabled={shareWithFriendsMutation.isPending}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#26D07C] hover:bg-[#26D07C]/90 text-white"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-green-500 hover:bg-green-600 text-white"
                     >
                       {shareWithFriendsMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Claim'}
                     </Button>
@@ -1321,7 +1329,7 @@ export default function Home() {
                     <Button
                       onClick={handleShareWithFriends}
                       disabled={!referralLink}
-                      className="h-8 w-16 text-xs font-bold rounded-lg bg-[#0098EA] hover:bg-[#0098EA]/90 text-white"
+                      className="h-8 w-16 text-xs font-bold rounded-lg bg-blue-500 hover:bg-blue-600 text-white"
                     >
                       Share
                     </Button>
@@ -1329,25 +1337,25 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between bg-[#1F2229] rounded-lg p-3 hover:bg-[#24262C] transition border border-[#2F3238]/30">
+              <div className="flex items-center justify-between bg-[#1a1a1a] rounded-lg p-3 hover:bg-[#222] transition">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
-                    <CalendarCheck className="w-4 h-4 text-[#0098EA]" />
+                    <CalendarCheck className="w-4 h-4 text-[#4cd3ff]" />
                     <p className="text-white text-sm font-medium truncate">Daily Check-in</p>
                   </div>
-                  <div className="text-xs text-[#B0B3B8] ml-6">
-                    <p>Reward: <span className="text-[#F5C542] font-medium">{appSettings?.dailyCheckinReward || '5'} Hrum</span></p>
+                  <div className="text-xs text-gray-400 ml-6">
+                    <p>Reward: <span className="text-white font-medium">{appSettings?.dailyCheckinReward || '5'} SAT</span></p>
                   </div>
                 </div>
                 <div className="ml-3 flex-shrink-0">
                   {missionStatus?.dailyCheckin?.claimed ? (
-                    <div className="h-8 w-20 rounded-lg bg-[#26D07C]/10 flex items-center justify-center">
-                      <Check className="w-4 h-4 text-[#26D07C]" />
+                    <div className="h-8 w-20 rounded-lg bg-green-500/20 flex items-center justify-center">
+                      <Check className="w-4 h-4 text-green-400" />
                     </div>
                   ) : dailyCheckinStep === 'ads' ? (
                     <Button
                       disabled={true}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#24262C] text-[#B0B3B8]"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-purple-600 text-white"
                     >
                       Watching...
                     </Button>
@@ -1355,14 +1363,14 @@ export default function Home() {
                     <Button
                       onClick={handleClaimDailyCheckin}
                       disabled={dailyCheckinMutation.isPending}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#26D07C] hover:bg-[#26D07C]/90 text-white"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-green-500 hover:bg-green-600 text-white"
                     >
                       {dailyCheckinMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Claim'}
                     </Button>
                   ) : (
                     <Button
                       onClick={handleDailyCheckin}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#0098EA] hover:bg-[#0098EA]/90 text-white"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#4cd3ff] hover:bg-[#3db8e0] text-black"
                     >
                       Check-in
                     </Button>
@@ -1370,38 +1378,38 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between bg-[#1F2229] rounded-lg p-3 hover:bg-[#24262C] transition border border-[#2F3238]/30">
+              <div className="flex items-center justify-between bg-[#1a1a1a] rounded-lg p-3 hover:bg-[#222] transition">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
-                    <Rocket className="w-4 h-4 text-[#0098EA]" />
+                    <Rocket className="w-4 h-4 text-[#4cd3ff]" />
                     <p className="text-white text-sm font-medium truncate">Check for Updates</p>
                   </div>
-                  <div className="text-xs text-[#B0B3B8] ml-6">
-                    <p>Reward: <span className="text-[#F5C542] font-medium">{appSettings?.checkForUpdatesReward || '5'} Hrum</span></p>
+                  <div className="text-xs text-gray-400 ml-6">
+                    <p>Reward: <span className="text-white font-medium">{appSettings?.checkForUpdatesReward || '5'} SAT</span></p>
                   </div>
                 </div>
                 <div className="ml-3 flex-shrink-0">
                   {missionStatus?.checkForUpdates?.claimed ? (
-                    <div className="h-8 w-20 rounded-lg bg-[#26D07C]/10 flex items-center justify-center">
-                      <Check className="w-4 h-4 text-[#26D07C]" />
+                    <div className="h-8 w-20 rounded-lg bg-green-500/20 flex items-center justify-center">
+                      <Check className="w-4 h-4 text-green-400" />
                     </div>
                   ) : checkForUpdatesStep === 'opened' ? (
-                    <div className="h-8 w-20 flex items-center justify-center gap-1 bg-[#1A1C20] border border-[#0098EA]/30 rounded-lg">
-                      <Clock size={12} className="text-[#0098EA]" />
+                    <div className="h-8 w-20 flex items-center justify-center gap-1 bg-[#1a1a1a] border border-[#4cd3ff]/30 rounded-lg">
+                      <Clock size={12} className="text-[#4cd3ff]" />
                       <span className="text-white text-xs font-bold">{checkForUpdatesCountdown}s</span>
                     </div>
                   ) : checkForUpdatesStep === 'ready' || checkForUpdatesStep === 'claiming' ? (
                     <Button
                       onClick={handleClaimCheckForUpdates}
                       disabled={checkForUpdatesMutation.isPending}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#26D07C] hover:bg-[#26D07C]/90 text-white"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-green-500 hover:bg-green-600 text-white"
                     >
                       {checkForUpdatesMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Claim'}
                     </Button>
                   ) : (
                     <Button
                       onClick={handleCheckForUpdates}
-                      className="h-8 w-20 text-xs font-bold rounded-lg bg-[#F5C542] hover:bg-[#F5C542]/90 text-black"
+                      className="h-8 w-20 text-xs font-bold rounded-lg bg-orange-500 hover:bg-orange-600 text-white"
                     >
                       Open
                     </Button>
@@ -1412,8 +1420,7 @@ export default function Home() {
 
             <Button
               onClick={() => setBoosterPopupOpen(false)}
-              variant="secondary"
-              className="w-full mt-6 rounded-xl font-bold"
+              className="w-full mt-6 bg-[#1a1a1a] hover:bg-[#222] text-white border border-[#333] rounded-xl"
             >
               Close
             </Button>
@@ -1421,172 +1428,23 @@ export default function Home() {
         </div>
       )}
 
-      {promoPopupOpen && (
-        <div className="fixed inset-0 bg-[#0E0F12]/90 flex items-center justify-center z-[60] px-4 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-[#1A1C20] rounded-[24px] p-6 w-full max-w-[320px] border border-[#2F3238]/50 relative shadow-2xl overflow-hidden"
-          >
-            <div className="relative z-10 pt-2">
-              <h2 className="text-xl font-bold text-white text-center mb-1 uppercase tracking-tight">Promo code</h2>
-              <p className="text-[11px] text-[#B0B3B8] text-center mb-4 font-bold leading-relaxed px-1">
-                Enter your promo code below to claim special rewards!
-              </p>
 
-              <div className="space-y-2">
-                <Input
-                  type="text"
-                  placeholder="Enter code"
-                  value={promoCode}
-                  onChange={(e) => setPromoCode(e.target.value)}
-                  className="bg-[#24262C] border-[#2F3238]/50 h-12 rounded-[16px] text-white text-center font-bold uppercase tracking-widest placeholder:text-[#7A7D85] text-sm shadow-inner"
-                />
-                
-                <Button
-                  onClick={() => promoCode.trim() && redeemPromoMutation.mutate(promoCode.trim())}
-                  disabled={isApplyingPromo || !promoCode.trim()}
-                  className="w-full h-12 bg-[#2D6CDF] hover:bg-[#2458b8] text-white rounded-[16px] font-bold text-sm transition-all active:scale-95 shadow-lg shadow-blue-500/20"
-                >
-                  {isApplyingPromo ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Applying...
-                    </div>
-                  ) : (
-                    "REDEEM"
-                  )}
-                </Button>
-
-                <div className="pt-3 border-t border-[#2F3238]/30 mt-2">
-                  <p className="text-[9px] text-[#7A7D85] text-center mb-2 font-bold uppercase tracking-wider opacity-60">
-                    Join our telegram channel for more gift codes!
-                  </p>
-                  
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => window.open("https://t.me/PaidAdzGroup", "_blank")}
-                      className="flex-1 h-10 bg-[#0098EA]/10 border-[#0098EA]/20 hover:bg-[#0098EA]/20 text-[#0098EA] rounded-lg font-bold text-[10px] uppercase tracking-wider gap-1"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      Join
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => setPromoPopupOpen(false)}
-                      className="h-10 px-4 bg-[#24262C] border-[#2F3238]/50 hover:bg-[#1F2229] text-white rounded-lg font-bold text-[10px] uppercase tracking-wider"
-                    >
-                      Close
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {convertPopupOpen && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] px-4 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-[#0d0d0d] rounded-[24px] p-6 w-full max-w-[320px] border border-white/5 relative shadow-2xl overflow-hidden"
-          >
-            <div className="relative z-10 pt-2">
-              <h2 className="text-xl font-black text-white text-center mb-1 uppercase tracking-tight">Exchange Hrum for TON</h2>
-              <p className="text-[11px] text-zinc-400 text-center mb-4 font-bold leading-relaxed px-1">
-                Convert your earned Hrum into TON cryptocurrency instantly.
-              </p>
-
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Amount (Hrum):</Label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      placeholder="0"
-                      value={convertAmount}
-                      onChange={(e) => setConvertAmount(e.target.value)}
-                      className="bg-white/5 border-white/10 h-11 rounded-xl text-white pl-4 pr-10 font-black text-sm focus:ring-blue-500/20 focus:border-blue-500/50 transition-all"
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className="w-6 h-6 rounded-full overflow-hidden border border-white/10">
-                        <img 
-                          src="/images/hrum-logo.jpg" 
-                          alt="Hrum" 
-                          className="w-full h-full object-cover scale-150"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center px-1">
-                    <span className="text-[9px] font-bold text-zinc-600 uppercase">Bal: {parseFloat((user as User)?.balance || '0').toLocaleString()}</span>
-                    <button 
-                      onClick={() => setConvertAmount((user as User)?.balance || '0')}
-                      className="text-[9px] font-black text-blue-500 uppercase hover:text-blue-400"
-                    >
-                      Max
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">To receive (TON):</Label>
-                  <div className="relative">
-                    <div className="bg-white/5 border border-white/10 text-white h-11 rounded-xl pl-4 pr-10 font-black text-sm flex items-center">
-                      {(Number(convertAmount || 0) / 10000).toFixed(4)}
-                    </div>
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <div className="w-6 h-6 rounded-full overflow-hidden border border-white/10 flex items-center justify-center">
-                        <img 
-                          src="/images/ton.png" 
-                          alt="TON" 
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <Button
-                    onClick={() => convertMutation.mutate({ amount: Number(convertAmount), convertTo: 'TON' })}
-                    disabled={convertMutation.isPending || !convertAmount || Number(convertAmount) <= 0}
-                    className="w-full h-11 bg-white hover:bg-zinc-200 text-black rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-white/5"
-                  >
-                    {convertMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      "Swap Now"
-                    )}
-                  </Button>
-                </div>
-
-                <div className="pt-3 border-t border-white/5 mt-1">
-                  <p className="text-[9px] text-zinc-500 text-center mb-2 font-black uppercase tracking-wider opacity-60">
-                    Rate: 10,000 Hrum = 1 TON
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => setConvertPopupOpen(false)}
-                    className="w-full h-10 bg-white/5 border-white/10 hover:bg-white/10 text-white rounded-lg font-black text-[10px] uppercase tracking-wider"
-                  >
-                    Close
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-      )}
 
       {settingsOpen && (
         <SettingsPopup 
           onClose={() => setSettingsOpen(false)} 
         />
       )}
+
+      {inviteOpen && <InvitePopup onClose={() => setInviteOpen(false)} />}
+      {menuOpen && <MenuPopup onClose={() => setMenuOpen(false)} />}
+
+      <WithdrawalPopup 
+        open={withdrawPopupOpen}
+        onOpenChange={setWithdrawPopupOpen}
+        tonBalance={withdrawBalance}
+      />
+
     </Layout>
   );
 }
