@@ -216,8 +216,12 @@ app.use((req, res, next) => {
         const { setupTelegramWebhook, checkBotStatus, getWebhookInfo } = await import('./telegram');
         
         // Use the correct domain for the webhook (Render, Replit, or require env)
+        // REPLIT_DOMAINS is a comma-separated list; use the first one
+        const replitDomains = process.env.REPLIT_DOMAINS?.split(',')[0]?.trim();
         const domain = process.env.RENDER_EXTERNAL_URL?.replace(/^https?:\/\//, '') ||
-                      process.env.REPLIT_DOMAIN || 
+                      replitDomains ||
+                      process.env.REPLIT_DOMAIN ||
+                      process.env.REPLIT_DEV_DOMAIN ||
                       (process.env.REPL_SLUG ? `${process.env.REPL_SLUG}.replit.app` : null);
         
         if (!domain) {

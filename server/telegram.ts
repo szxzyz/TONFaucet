@@ -58,6 +58,20 @@ const pendingRejections = new Map<string, {
 // State management for admin broadcast flow
 const pendingBroadcasts = new Map<string, { timestamp: number }>();
 
+// State management for user Set Wallet flow
+const pendingSetWallet = new Map<string, { timestamp: number }>();
+
+// State management for user Advertiser flow
+const pendingAdvertiser = new Map<string, { timestamp: number }>();
+
+// State management for admin task creation flow
+const pendingTaskCreation = new Map<string, {
+  step: 'channel' | 'reward' | 'winners';
+  channelLink?: string;
+  reward?: string;
+  timestamp: number;
+}>(); 
+
 // Utility function to format TON amounts
 function format$(value: string | number): string {
   const num = parseFloat(String(value));
@@ -680,38 +694,34 @@ export async function sendSharePhotoToChat(
   }
 }
 
-export async function formatWelcomeMessage(): Promise<{ message: string; inlineKeyboard: any }> {
-  const botUsername = await getBotUsername();
-  const channelUrl = 'https://t.me/LightningSatoshi';
-  const groupUrl = 'https://t.me/LightningSatCommunity';
-  
-  const message = `🚀 It's Time to Start Mining Sats\n\n` +
-                 `The journey has begun.\n` +
-                 `Who knows how many Satoshis you'll earn, how fast your balance will grow, or who you'll invite along the way?\n\n` +
-                 `One thing is certain: the earning journey has started.\n\n` +
-                 `⚡ Mine daily to boost your earnings\n` +
-                 `👥 Invite friends and earn together\n` +
-                 `💰 Collect Sats and withdraw anytime\n\n` +
-                 `Join now and don't miss your chance to start stacking Satoshi.`;
+export async function formatWelcomeMessage(): Promise<{ message: string; inlineKeyboard: any; replyKeyboard: any }> {
+  const channelUrl = 'https://t.me/TONAirdropHunting';
+
+  const message = `Welcome to this bot to earn free $TON.\n\n` +
+                 `Join our channel @TONAirdropHunting we share free $TON giveaways daily!\n\n` +
+                 `See all available giveaways on our channel`;
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
         {
-          text: "🚀 Let's Go",
-          url: `https://t.me/${botUsername}/MyWAdz`
-        }
-      ],
-      [
-        {
-          text: "📢 Channel",
+          text: "📢 Join Channel",
           url: channelUrl
         }
       ]
     ]
   };
 
-  return { message, inlineKeyboard };
+  const replyKeyboard = {
+    keyboard: [
+      [{ text: "💳 Set Wallet" }, { text: "💰 Deposit" }],
+      [{ text: "👥 Referrals" }, { text: "📊 Advertiser" }]
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false
+  };
+
+  return { message, inlineKeyboard, replyKeyboard };
 }
 
 export async function sendWelcomeMessage(userId: string): Promise<boolean> {
@@ -727,31 +737,24 @@ export async function sendWelcomeMessage(userId: string): Promise<boolean> {
     console.error('Error checking ban status for welcome message:', err);
   }
 
-  const { message, inlineKeyboard } = await formatWelcomeMessage();
-  const domain = process.env.REPLIT_DOMAIN || (process.env.REPL_SLUG ? `${process.env.REPL_SLUG}.replit.app` : null);
-  const imageUrl = domain ? `https://${domain}/images/welcome-image.jpg` : null;
-  
+  const { message, inlineKeyboard, replyKeyboard } = await formatWelcomeMessage();
+
   try {
-    if (imageUrl) {
-      const payload = {
+    // First send message with inline keyboard (Join Channel button)
+    await sendUserTelegramNotification(userId, message, inlineKeyboard);
+
+    // Send a second message to attach the reply keyboard (persistent keyboard buttons)
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         chat_id: userId,
-        photo: imageUrl,
-        caption: message,
-        parse_mode: 'HTML',
-        reply_markup: inlineKeyboard
-      };
+        text: '👇',
+        reply_markup: replyKeyboard
+      })
+    });
 
-      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) return true;
-    }
-    
-    // Fallback to text if photo fails or imageUrl is null
-    return await sendUserTelegramNotification(userId, message, inlineKeyboard);
+    return true;
   } catch (error) {
     return await sendUserTelegramNotification(userId, message, inlineKeyboard);
   }
@@ -804,6 +807,73 @@ export async function sendBroadcastMessage(message: string, adminTelegramId: str
   } catch (error) {
     console.error('❌ Error sending broadcast message:', error);
     return { success: 0, failed: 0 };
+  }
+}
+
+// Post a giveaway task to the TON Airdrop channel
+export async function postGiveawayToChannel(task: {
+  id: string;
+  channelUsername: string;
+  rewardPerWinner: string;
+  totalWinners: number;
+  totalReward: string;
+}): Promise<boolean> {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+
+  const CHANNEL_ID = '@TONAirdropHunting';
+  const botUsername = await getBotUsername();
+
+  const channelTag = task.channelUsername.startsWith('@') ? task.channelUsername : `@${task.channelUsername}`;
+
+  const message =
+    `New Free #TON #Giveaway 👇\n` +
+    `${task.rewardPerWinner} TON for ${task.totalWinners} winners\n\n` +
+    `Sponsored by @TONAirdropHunting\n` +
+    `#toncoin #airdrop\n\n` +
+    `Follow the advertiser's link, then click "Get Reward".\n` +
+    `──────────────────────\n` +
+    `💎 Total reward ${task.totalReward} TON\n` +
+    `👥 Limits ${task.totalWinners} winners\n` +
+    `🎁 Sponsored by ${channelTag}\n\n` +
+    `🔰 Tags: #TON #Giveaway #Toncoin #Airdrop\n` +
+    `──────────────────────\n` +
+    `Giveaway Network: (@${botUsername})`;
+
+  const inlineKeyboard = {
+    inline_keyboard: [
+      [
+        { text: "📢 Subscribe", url: `https://t.me/${task.channelUsername.replace('@', '')}` },
+        { text: "⁉️ Tutorial", url: `https://t.me/TONAirdropHunting` }
+      ],
+      [
+        { text: "👉 Get Reward 👈", callback_data: `get_reward_${task.id}` }
+      ]
+    ]
+  };
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: CHANNEL_ID,
+        text: message,
+        parse_mode: 'HTML',
+        reply_markup: inlineKeyboard
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ Giveaway posted to channel successfully');
+      return true;
+    } else {
+      const err = await response.text();
+      console.error('❌ Failed to post giveaway to channel:', err);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error posting giveaway to channel:', error);
+    return false;
   }
 }
 
@@ -1030,6 +1100,111 @@ Share your unique referral link and earn Hrum when your friends join:
         return true;
       }
       
+      // Handle "Get Reward" button for giveaway tasks
+      if (data && data.startsWith('get_reward_')) {
+        const taskId = data.replace('get_reward_', '');
+
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: callbackQuery.id })
+        });
+
+        try {
+          const { storage: storageInstance } = await import('./storage');
+          const { db } = await import('./db');
+          const { taskClicks, advertiserTasks } = await import('../shared/schema');
+          const { eq, and, sql: drizzleSql } = await import('drizzle-orm');
+
+          const task = await storageInstance.getTaskById(taskId).catch(() => null);
+
+          if (!task) {
+            await sendUserTelegramNotification(chatId, '❌ This giveaway task is no longer available.');
+            return true;
+          }
+
+          if (task.status !== 'running' && task.status !== 'active') {
+            await sendUserTelegramNotification(chatId, '❌ This giveaway is no longer active.');
+            return true;
+          }
+
+          // Get user DB record
+          const userForTask = await storageInstance.getUserByTelegramId(chatId);
+          if (!userForTask) {
+            await sendUserTelegramNotification(chatId, '❌ Please start the bot first with /start');
+            return true;
+          }
+
+          // Check if user already claimed reward for this task
+          const existingClick = await db.select()
+            .from(taskClicks)
+            .where(and(eq(taskClicks.taskId, taskId), eq(taskClicks.publisherId, userForTask.id)))
+            .limit(1)
+            .catch(() => []);
+          
+          if (existingClick.length > 0) {
+            await sendUserTelegramNotification(chatId, '✅ You have already claimed the reward for this giveaway!');
+            return true;
+          }
+
+          // Check if winners limit reached
+          const claimedCount = await db.select({ count: drizzleSql<number>`count(*)` })
+            .from(taskClicks)
+            .where(eq(taskClicks.taskId, taskId))
+            .catch(() => [{ count: 0 }]);
+          const totalClaimed = Number(claimedCount[0]?.count || 0);
+
+          if (totalClaimed >= (task.totalClicksRequired || 0)) {
+            await sendUserTelegramNotification(chatId, '😔 Sorry, all rewards for this giveaway have been claimed.');
+            return true;
+          }
+
+          // Verify channel membership using the task link field
+          const channelUsername = task.link || '';
+          const isMember = channelUsername
+            ? await verifyChannelMembership(parseInt(chatId), channelUsername, TELEGRAM_BOT_TOKEN!)
+            : false;
+
+          if (!isMember) {
+            const displayChannel = channelUsername.startsWith('@') ? channelUsername : `@${channelUsername}`;
+            await sendUserTelegramNotification(chatId,
+              `❌ Please join the channel first, then click "Get Reward" again.\n\n` +
+              `Channel: ${displayChannel}`
+            );
+            return true;
+          }
+
+          // Give reward - record the click
+          const rewardAmount = task.costPerClick || '0.00010000';
+          await db.insert(taskClicks).values({
+            taskId,
+            publisherId: userForTask.id,
+            rewardAmount
+          }).catch((e: any) => console.error('Error inserting task click:', e));
+
+          // Update currentClicks count
+          await db.update(advertiserTasks)
+            .set({ currentClicks: (task.currentClicks || 0) + 1 })
+            .where(eq(advertiserTasks.id, taskId))
+            .catch(() => null);
+
+          // Add balance to user
+          await storageInstance.addBalance(userForTask.id, rewardAmount).catch(() => null);
+
+          await sendUserTelegramNotification(chatId,
+            `🎉 Congratulations! You earned <b>${parseFloat(rewardAmount).toFixed(8)} TON</b> from this giveaway!\n\n` +
+            `Check your balance in the app.`,
+            undefined,
+            'HTML'
+          );
+        } catch (error) {
+          console.error('❌ Error processing get_reward callback:', error);
+          await sendUserTelegramNotification(chatId, '❌ Error processing reward. Please try again later.');
+        }
+
+        return true;
+      }
+
       if (data === 'refresh_stats' && isAdmin(chatId)) {
         try {
           const stats = await storage.getAppStats();
@@ -2229,7 +2404,190 @@ Please contact support if you believe this is a mistake.`;
       return true;
     }
 
-    // All keyboard navigation removed - bot uses inline buttons only for withdrawal management
+    // Handle Set Wallet pending state - user is submitting their FaucetPay email
+    if (pendingSetWallet.delete(chatId)) {
+      const faucetpayEmail = text.trim();
+      try {
+        const { db: dbInstance } = await import('./db');
+        const { users: usersTable } = await import('../shared/schema');
+        const { eq: eqOp } = await import('drizzle-orm');
+        await dbInstance.update(usersTable)
+          .set({ tonWalletAddress: faucetpayEmail, walletUpdatedAt: new Date() })
+          .where(eqOp(usersTable.telegram_id, chatId));
+        await sendUserTelegramNotification(chatId,
+          `✅ Your FaucetPay email has been saved: <code>${escapeHtml(faucetpayEmail)}</code>\n\n` +
+          `You can update it anytime by clicking "💳 Set Wallet" again.`,
+          undefined,
+          'HTML'
+        );
+      } catch (error) {
+        console.error('❌ Error saving wallet:', error);
+        await sendUserTelegramNotification(chatId, '❌ Error saving wallet. Please try again.');
+      }
+      return true;
+    }
+
+    // Handle Advertiser pending state - user sent their channel link
+    if (pendingAdvertiser.delete(chatId)) {
+      const channelLink = text.trim();
+      const adminId = process.env.TELEGRAM_ADMIN_ID;
+      if (adminId) {
+        await sendUserTelegramNotification(adminId,
+          `📊 <b>New Advertiser Request</b>\n\n` +
+          `👤 User: ${escapeHtml(updateMessage.from?.first_name || 'Unknown')}\n` +
+          `🆔 Telegram ID: <code>${chatId}</code>\n` +
+          `🔗 Channel/Group: ${escapeHtml(channelLink)}\n\n` +
+          `To create a giveaway task for this channel, use:\n` +
+          `/newtask ${channelLink}`,
+          undefined,
+          'HTML'
+        );
+      }
+      await sendUserTelegramNotification(chatId,
+        `✅ Your request has been submitted!\n\n` +
+        `Our team will review your channel and create the giveaway post shortly.\n\n` +
+        `💎 Cost: 0.250 $TON\n\n` +
+        `You will be notified once your giveaway is live.`
+      );
+      return true;
+    }
+
+    // Handle keyboard buttons
+    if (text === '💳 Set Wallet') {
+      pendingSetWallet.set(chatId, { timestamp: Date.now() });
+      await sendUserTelegramNotification(chatId,
+        `To know your faucetpay Gmail, create an account here:\nhttps://Faucetpay.com and go to your profile page.\n\nPlease enter your faucetpay Gmail:`
+      );
+      return true;
+    }
+
+    if (text === '💰 Deposit') {
+      await sendUserTelegramNotification(chatId, `🔧 Under system development.`);
+      return true;
+    }
+
+    if (text === '👥 Referrals') {
+      try {
+        const botUsername = await getBotUsername();
+        // Use dbUser already fetched at the top of this function
+        const refCode = dbUser.referralCode;
+
+        if (refCode) {
+          const referralLink = `https://t.me/${botUsername}?start=${refCode}`;
+          await sendUserTelegramNotification(chatId,
+            `👥 <b>Earn passive income by inviting your friends!</b>\n\n` +
+            `They will earn 0.00010000 $TON on signup.\n` +
+            `You will earn 50% of their earnings.\n\n` +
+            `Your referral link is:\n<code>${referralLink}</code>`,
+            undefined,
+            'HTML'
+          );
+        } else {
+          await sendUserTelegramNotification(chatId,
+            `👥 <b>Earn passive income by inviting your friends!</b>\n\n` +
+            `They will earn 0.00010000 $TON on signup.\n` +
+            `You will earn 50% of their earnings.\n\n` +
+            `Please start the bot first with /start to get your referral link.`,
+            undefined,
+            'HTML'
+          );
+        }
+      } catch (error) {
+        console.error('❌ Error handling Referrals button:', error);
+        await sendUserTelegramNotification(chatId, '❌ Error loading referral info. Please try again.');
+      }
+      return true;
+    }
+
+    if (text === '📊 Advertiser') {
+      const botUsername = await getBotUsername();
+      pendingAdvertiser.set(chatId, { timestamp: Date.now() });
+      await sendUserTelegramNotification(chatId,
+        `📊 <b>Advertise your Telegram Channel or Group</b>\n\n` +
+        `Your link will be shown to thousands of users.\n\n` +
+        `This will cost you <b>0.250 $TON</b>\n\n` +
+        `Add this bot @${botUsername} as admin on your channel to verify if users have joined. You will have better results.\n\n` +
+        `Please send your Telegram Channel or Group link 👇`,
+        undefined,
+        'HTML'
+      );
+      return true;
+    }
+
+    // Admin command to create a new giveaway task: /newtask @channelUsername reward winners
+    if (text.startsWith('/newtask') && isAdmin(chatId)) {
+      const parts = text.split(' ');
+      if (parts.length < 4) {
+        await sendUserTelegramNotification(chatId,
+          `📋 Usage: /newtask @channelUsername rewardPerWinner numberOfWinners\n\n` +
+          `Example: /newtask @MyChannel 0.06 1000`
+        );
+        return true;
+      }
+
+      const channelArg = parts[1];
+      const rewardArg = parts[2];
+      const winnersArg = parseInt(parts[3]);
+
+      if (isNaN(winnersArg) || winnersArg <= 0) {
+        await sendUserTelegramNotification(chatId, '❌ Invalid number of winners. Please use a positive integer.');
+        return true;
+      }
+
+      const rewardNum = parseFloat(rewardArg);
+      if (isNaN(rewardNum) || rewardNum <= 0) {
+        await sendUserTelegramNotification(chatId, '❌ Invalid reward amount. Please use a positive number.');
+        return true;
+      }
+
+      const totalReward = (rewardNum * winnersArg).toFixed(3);
+
+      try {
+        const { storage: storageInstance } = await import('./storage');
+
+        // Get the admin user's DB ID
+        const adminUser = await storageInstance.getUserByTelegramId(chatId);
+        if (!adminUser) {
+          await sendUserTelegramNotification(chatId, '❌ Admin user not found in database.');
+          return true;
+        }
+
+        const newTask = await storageInstance.createTask({
+          advertiserId: adminUser.id,
+          taskType: 'channel_join',
+          title: `TON Giveaway - ${channelArg}`,
+          link: channelArg,
+          totalClicksRequired: winnersArg,
+          costPerClick: rewardArg,
+          totalCost: totalReward,
+          status: 'running'
+        });
+
+        await postGiveawayToChannel({
+          id: newTask.id,
+          channelUsername: channelArg,
+          rewardPerWinner: parseFloat(rewardArg).toFixed(8),
+          totalWinners: winnersArg,
+          totalReward
+        });
+
+        await sendUserTelegramNotification(chatId,
+          `✅ <b>Giveaway task created and posted to channel!</b>\n\n` +
+          `📢 Channel: ${channelArg}\n` +
+          `💰 Reward per winner: ${parseFloat(rewardArg).toFixed(8)} TON\n` +
+          `👥 Max winners: ${winnersArg}\n` +
+          `💎 Total reward: ${totalReward} TON\n` +
+          `🆔 Task ID: ${newTask.id}`,
+          undefined,
+          'HTML'
+        );
+      } catch (error) {
+        console.error('❌ Error creating giveaway task:', error);
+        await sendUserTelegramNotification(chatId, '❌ Error creating giveaway task. Please try again.');
+      }
+
+      return true;
+    }
 
     // Admin command to list pending withdrawal requests
     if (text === '/payouts' || text === '/withdrawals') {
